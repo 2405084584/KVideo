@@ -6,9 +6,11 @@ import { transform } from 'esbuild';
 
 // Android 9 / Amlogic TV WebViews are often Chrome 66–74.
 // chrome83 still emits `??` (Chrome 80+), which white-screens those devices.
+// chrome69 downlevels `??` / `?.` / logical assignment in application code.
 const TARGET = 'chrome69';
-// Logical assignment + nullish coalescing + optional chaining break old WebViews.
-const UNSUPPORTED_MODERN_SYNTAX = /(\?\?=|\|\|=|&&=|\?\?|\?\.)/;
+// Hard-fail only on logical assignment: unambiguous and never appears in polyfill
+// feature-detect regexes (e.g. `/()??/`) or minified ternaries (`E?.3:1`).
+const UNSUPPORTED_LOGICAL_ASSIGNMENT = /(\?\?=|\|\|=|&&=)/;
 
 async function pathExists(filePath) {
   try {
@@ -50,8 +52,8 @@ async function transpileFile(filePath) {
 
   await fs.writeFile(filePath, result.code);
 
-  if (UNSUPPORTED_MODERN_SYNTAX.test(result.code)) {
-    throw new Error(`${filePath} still contains modern syntax unsupported by ${TARGET} after transpilation.`);
+  if (UNSUPPORTED_LOGICAL_ASSIGNMENT.test(result.code)) {
+    throw new Error(`${filePath} still contains logical assignment syntax after ${TARGET} transpilation.`);
   }
 }
 
