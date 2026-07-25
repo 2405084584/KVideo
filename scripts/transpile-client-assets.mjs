@@ -4,8 +4,11 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { transform } from 'esbuild';
 
-const TARGET = 'chrome83';
-const UNSUPPORTED_LOGICAL_ASSIGNMENT = /(\?\?=|\|\|=|&&=)/;
+// Android 9 / Amlogic TV WebViews are often Chrome 66–74.
+// chrome83 still emits `??` (Chrome 80+), which white-screens those devices.
+const TARGET = 'chrome69';
+// Logical assignment + nullish coalescing + optional chaining break old WebViews.
+const UNSUPPORTED_MODERN_SYNTAX = /(\?\?=|\|\|=|&&=|\?\?|\?\.)/;
 
 async function pathExists(filePath) {
   try {
@@ -47,8 +50,8 @@ async function transpileFile(filePath) {
 
   await fs.writeFile(filePath, result.code);
 
-  if (UNSUPPORTED_LOGICAL_ASSIGNMENT.test(result.code)) {
-    throw new Error(`${filePath} still contains logical assignment syntax after ${TARGET} transpilation.`);
+  if (UNSUPPORTED_MODERN_SYNTAX.test(result.code)) {
+    throw new Error(`${filePath} still contains modern syntax unsupported by ${TARGET} after transpilation.`);
   }
 }
 
