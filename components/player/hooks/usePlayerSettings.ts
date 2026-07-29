@@ -22,6 +22,8 @@ interface PlayerSettingsSnapshot {
     adFilter: boolean;
     adFilterMode: AdFilterMode;
     adKeywords: string[];
+    customAdFilterCode: string;
+    customAdFilterVersion: number;
     fullscreenType: 'auto' | 'native' | 'window';
     proxyMode: 'retry' | 'none' | 'always';
     danmakuEnabled: boolean;
@@ -45,6 +47,8 @@ function getPlayerSettingsSnapshot(isPremium: boolean, mediaProxyEnabled: boolea
         adFilter: globalSettings.adFilter,
         adFilterMode: modeSettings.adFilterMode,
         adKeywords: globalSettings.adKeywords,
+        customAdFilterCode: globalSettings.customAdFilterCode || '',
+        customAdFilterVersion: globalSettings.customAdFilterVersion || 0,
         fullscreenType: modeSettings.fullscreenType,
         proxyMode: mediaProxyEnabled ? modeSettings.proxyMode : 'none',
         danmakuEnabled: modeSettings.danmakuEnabled,
@@ -66,6 +70,8 @@ function playerSettingsEqual(a: PlayerSettingsSnapshot, b: PlayerSettingsSnapsho
         a.adFilter === b.adFilter &&
         a.adFilterMode === b.adFilterMode &&
         a.adKeywords === b.adKeywords &&
+        a.customAdFilterCode === b.customAdFilterCode &&
+        a.customAdFilterVersion === b.customAdFilterVersion &&
         a.fullscreenType === b.fullscreenType &&
         a.proxyMode === b.proxyMode &&
         a.danmakuEnabled === b.danmakuEnabled &&
@@ -165,6 +171,13 @@ export function usePlayerSettings(isPremium: boolean = false) {
         updateGlobalSettings({ adKeywords: value });
     }, [updateGlobalSettings]);
 
+    const setCustomAdFilterCode = useCallback((code: string, version?: number) => {
+        updateGlobalSettings({
+            customAdFilterCode: code,
+            ...(version !== undefined ? { customAdFilterVersion: version } : {})
+        });
+    }, [updateGlobalSettings]);
+
     const setFullscreenType = useCallback((value: 'auto' | 'native' | 'window') => {
         updateModeSettings({ fullscreenType: value });
     }, [updateModeSettings]);
@@ -204,6 +217,7 @@ export function usePlayerSettings(isPremium: boolean = false) {
         setAdFilter,
         setAdFilterMode,
         setAdKeywords,
+        setCustomAdFilterCode,
         setFullscreenType,
         setProxyMode,
         setDanmakuEnabled,

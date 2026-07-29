@@ -38,6 +38,8 @@ interface MainPattern {
     avgDuration: number;
     commonPrefix: string;
     pathPrefix: string; // Directory path prefix (e.g., "/20230907/73PWifvT/1392kb/hls/")
+    isGlobalNTSC: boolean; // Whether >30% of total playlist segments use 30fps NTSC frame fractions
+    isGlobal24fps: boolean; // Whether >35% of total playlist segments use 24fps/23.976fps frame fractions (.004, .002, .008)
 }
 
 /**
@@ -181,7 +183,7 @@ export function learnMainPattern(blocks: Block[]): MainPattern {
     ) : null;
 
     if (!mainBlock || mainBlock.segments.length === 0) {
-        return { filenameRegex: null, avgDuration: 0, commonPrefix: '', pathPrefix: '' };
+        return { filenameRegex: null, avgDuration: 0, commonPrefix: '', pathPrefix: '', isGlobalNTSC: false, isGlobal24fps: false };
     }
 
     // Extract filenames
@@ -208,7 +210,26 @@ export function learnMainPattern(blocks: Block[]): MainPattern {
     const firstUrl = mainBlock.segments[0].url;
     const pathPrefix = extractPathPrefix(firstUrl);
 
-    return { filenameRegex, avgDuration, commonPrefix, pathPrefix };
+    // Calculate global NTSC 30fps and 24fps/23.976fps fraction ratios across all blocks in the playlist
+    const ntscFractions = new Set([33, 67, 133, 167, 233, 267, 333, 367, 433, 467, 533, 567, 633, 667, 733, 767, 833, 867, 933, 967]);
+    const fps24Fractions = new Set([2, 4, 6, 8, 12, 16, 20, 24]);
+    let totalSegCount = 0;
+    let ntscSegCount = 0;
+    let fps24SegCount = 0;
+
+    blocks.forEach(b => {
+        b.segments.forEach(s => {
+            totalSegCount++;
+            const msFraction = Math.round((s.duration % 1) * 1000);
+            if (ntscFractions.has(msFraction)) ntscSegCount++;
+            if (fps24Fractions.has(msFraction)) fps24SegCount++;
+        });
+    });
+
+    const isGlobalNTSC = totalSegCount > 0 && (ntscSegCount / totalSegCount) > 0.3;
+    const isGlobal24fps = totalSegCount > 0 && (fps24SegCount / totalSegCount) > 0.35;
+
+    return { filenameRegex, avgDuration, commonPrefix, pathPrefix, isGlobalNTSC, isGlobal24fps };
 }
 
 /**
@@ -226,6 +247,7 @@ export function findDuplicateSignatureBlockIndices(blocks: Block[]): Set<number>
     // Find the largest block (assumed main content block)
     let mainBlockIndex = -1;
     let maxSegments = 0;
+
     blocks.forEach((block, idx) => {
         if (block.segments.length > maxSegments) {
             maxSegments = block.segments.length;
@@ -233,12 +255,27 @@ export function findDuplicateSignatureBlockIndices(blocks: Block[]): Set<number>
         }
     });
 
+    let mainAvgDuration = 0;
+    if (mainBlockIndex >= 0 && blocks[mainBlockIndex].segments.length > 0) {
+        const mainSegs = blocks[mainBlockIndex].segments;
+        mainAvgDuration = mainSegs.reduce((sum, s) => sum + s.duration, 0) / mainSegs.length;
+    }
+
     // Map signature -> array of block indices
     const signatureMap = new Map<string, number[]>();
 
     blocks.forEach((block, idx) => {
         // Require at least 3 segments to form a signature to prevent accidental single-segment collisions
         if (block.segments.length < 3) return;
+
+        const firstDur = block.segments[0].duration;
+        const isUniformBlock = block.segments.every(s => Math.abs(s.duration - firstDur) < 0.005);
+
+        // If the block is uniform (e.g. 2.0s, 2.0s, 2.0s) AND its duration matches the main content's duration (e.g. zuida.m3u8 where main content is also 2.0s),
+        // it represents normal main video chunking and must NOT be flagged as an ad signature.
+        if (isUniformBlock && mainAvgDuration > 0 && Math.abs(firstDur - mainAvgDuration) < 0.05) {
+            return;
+        }
 
         // Signature based on segment durations rounded to 3 decimal places (milliseconds precision)
         const signature = block.segments.map(s => s.duration.toFixed(3)).join(',');
@@ -248,12 +285,12 @@ export function findDuplicateSignatureBlockIndices(blocks: Block[]): Set<number>
         signatureMap.set(signature, existing);
     });
 
-    // Flag blocks whose signatures appear 2 or more times
+    // Flag blocks whose signatures appear 2 or more times (up to 30% of total blocks, at least 3)
+    const maxAllowedAdOccurrences = Math.max(3, blocks.length * 0.3);
     signatureMap.forEach((indices) => {
-        if (indices.length >= 2) {
+        if (indices.length >= 2 && indices.length <= maxAllowedAdOccurrences) {
             indices.forEach(idx => {
-                // Ensure we don't accidentally flag the main content block
-                if (idx !== mainBlockIndex && blocks[idx].segments.length < maxSegments * 0.8) {
+                if (idx !== mainBlockIndex) {
                     duplicateIndices.add(idx);
                 }
             });
@@ -319,6 +356,46 @@ export function scoreBlock(
         if (pathMismatchCount === block.segments.length) {
             // ALL segments have different path prefix - strong ad indicator
             score += 5.0;
+        }
+    }
+
+    // **ENHANCEMENT**: Duration anomaly heuristic for mid-roll inserted ad blocks
+    // If main content has a consistent segment duration (e.g., 6.0s or 10.0s),
+    // but this small block has a vastly different duration signature (e.g., 2.0s),
+    // add additional score when combined with filename or path mismatch.
+    if (mainPattern.avgDuration > 0 && block.segments.length > 0 && block.segments.length <= 6) {
+        const blockAvgDuration = block.segments.reduce((sum, s) => sum + s.duration, 0) / block.segments.length;
+        const durationRatio = blockAvgDuration / mainPattern.avgDuration;
+        if (durationRatio < 0.6 || durationRatio > 1.8) {
+            score += 1.5;
+        }
+    }
+
+    // **KEY FEATURE**: Framerate fraction grid anomaly detection (30fps vs 25fps inserted ad detection)
+    // Spliced NTSC 30fps/60fps ads inserted into 25fps/50fps streams create distinct fractional ms (.333, .667, .867, .133, .733).
+    // Note: Only triggered if the main content itself is NOT a global NTSC 30fps stream.
+    if (!mainPattern.isGlobalNTSC && block.segments.length > 0 && block.segments.length <= 10) {
+        const ntscFractions = new Set([33, 67, 133, 167, 233, 267, 333, 367, 433, 467, 533, 567, 633, 667, 733, 767, 833, 867, 933, 967]);
+        let ntscMatches = 0;
+        block.segments.forEach(s => {
+            const msFraction = Math.round((s.duration % 1) * 1000);
+            if (ntscFractions.has(msFraction)) ntscMatches++;
+        });
+        if (ntscMatches === block.segments.length) {
+            score += 5.0; // Definite framerate anomaly for inserted ad block
+        }
+    }
+
+    // **KEY FEATURE**: Framerate fraction grid anomaly detection (25fps/integer ads inserted into 24fps/23.976fps streams)
+    // 24fps movie streams have fractional ms (.004, .002, .008). 25fps/PAL inserted ads use exact integer milliseconds (.000).
+    if (mainPattern.isGlobal24fps && block.segments.length > 0 && block.segments.length <= 10) {
+        let int0Count = 0;
+        block.segments.forEach(s => {
+            const msFraction = Math.round((s.duration % 1) * 1000);
+            if (msFraction === 0) int0Count++;
+        });
+        if (int0Count >= block.segments.length - 1 && int0Count >= 2) {
+            score += 5.0; // Definite 25fps integer ad inserted into 24fps movie stream
         }
     }
 

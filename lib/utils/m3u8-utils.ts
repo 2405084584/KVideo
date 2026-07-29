@@ -81,10 +81,57 @@ function isAuxiliaryAdMetadataLine(trimmedLine: string, normalizedKeywords: stri
  * @param baseUrl The base URL of the M3U8 file (to resolve relative paths)
  * @returns The filtered M3U8 content
  */
+/**
+ * Strips TypeScript type annotations from dynamic ad filter JavaScript/TypeScript code
+ */
+export function removeTypeAnnotations(code: string): string {
+    return code
+        .replace(/(\w+)\s*:\s*(string|number|boolean|any|void|never|unknown|object)\s*([,)])/g, '$1$3')
+        .replace(/\)\s*:\s*(string|number|boolean|any|void|never|unknown|object)\s*\{/g, ') {')
+        .replace(/(const|let|var)\s+(\w+)\s*:\s*(string|number|boolean|any|void|never|unknown|object)\s*=/g, '$1 $2 =');
+}
+
+/**
+ * Safely executes dynamic custom ad filter code using Function constructor sandbox.
+ * Returns filtered content string or null if execution fails/throws.
+ */
+export function executeCustomAdFilter(customCode: string, content: string, baseUrl: string): string | null {
+    if (!customCode || !customCode.trim()) return null;
+    try {
+        const jsCode = removeTypeAnnotations(customCode);
+        const customFunction = new Function(
+            'content',
+            'baseUrl',
+            jsCode + '\nif (typeof filterAdsFromM3U8 === "function") { return filterAdsFromM3U8(content, baseUrl); } else if (typeof filterAds === "function") { return filterAds(content, baseUrl); } return content;'
+        );
+        const result = customFunction(content, baseUrl);
+        return typeof result === 'string' ? result : null;
+    } catch (err) {
+        console.warn('[AdFilter] Custom script execution failed, falling back to built-in rules:', err);
+        return null;
+    }
+}
+
 export type AdFilterMode = 'off' | 'keyword' | 'heuristic' | 'aggressive';
 
-export function filterM3u8Ad(content: string, baseUrl: string, mode: AdFilterMode = 'heuristic', customKeywords: string[] = []): string {
+export function filterM3u8Ad(
+    content: string,
+    baseUrl: string,
+    mode: AdFilterMode = 'heuristic',
+    customKeywords: string[] = [],
+    customCode?: string
+): string {
     if (!content) return '';
+    if (mode === 'off') return content;
+
+    // 1. Try executing custom dynamic filter script first (if provided)
+    if (customCode && customCode.trim()) {
+        const customResult = executeCustomAdFilter(customCode, content, baseUrl);
+        if (customResult !== null) {
+            return customResult;
+        }
+        // If custom script execution fails/throws, gracefully fall through to built-in heuristics
+    }
 
     // Use keywords passed from AdKeywordsWrapper (already loaded from env/file)
     const normalizedKeywords = normalizeKeywords(customKeywords);
@@ -107,8 +154,8 @@ export function filterM3u8Ad(content: string, baseUrl: string, mode: AdFilterMod
     } catch (e) { /* ignore */ }
 
     // 2. Global Scan: Check if any ad keywords exist in the content
-    const hasKeywordMatchInPlaylist = mode !== 'off' && hasKeywordMatch(content, normalizedKeywords);
-    const hasCueTag = mode !== 'off' && (content.includes('#EXT-X-CUE-OUT') || content.includes('#EXT-X-CUE-IN'));
+    const hasKeywordMatchInPlaylist = hasKeywordMatch(content, normalizedKeywords);
+    const hasCueTag = content.includes('#EXT-X-CUE-OUT') || content.includes('#EXT-X-CUE-IN');
 
     // 3. Heuristic Analysis: If no explicit ad signals, use block-based detection
     const lines = content.split(/\r?\n/);
@@ -174,16 +221,15 @@ export function filterM3u8Ad(content: string, baseUrl: string, mode: AdFilterMod
 
         // 4. Strip modern HLS interstitial metadata before the player can schedule it.
         if (
-            mode !== 'off' &&
-            (isInterstitialDateRange(trimmedLine, normalizedKeywords) ||
-                isAuxiliaryAdMetadataLine(trimmedLine, normalizedKeywords))
+            isInterstitialDateRange(trimmedLine, normalizedKeywords) ||
+            isAuxiliaryAdMetadataLine(trimmedLine, normalizedKeywords)
         ) {
             continue;
         }
 
         // 5. CUE Tag Detection (SCTE-35 Standard)
         // EXT-X-CUE-OUT marks start of ad, EXT-X-CUE-IN marks end
-        if (mode !== 'off' && trimmedLine.startsWith('#EXT-X-CUE-OUT')) {
+        if (trimmedLine.startsWith('#EXT-X-CUE-OUT')) {
             insideCueAdBlock = true;
             // Remove preceding DISCONTINUITY if present
             if (processedLines.length > 0 && processedLines[processedLines.length - 1].trim() === '#EXT-X-DISCONTINUITY') {
