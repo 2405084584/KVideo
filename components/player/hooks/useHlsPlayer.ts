@@ -22,7 +22,7 @@ export function useHlsPlayer({
     onError
 }: UseHlsPlayerProps) {
     const hlsRef = useRef<Hls | null>(null);
-    const { adFilterMode, adKeywords, customAdFilterCode } = usePlayerSettings(isPremium);
+    const { adFilterMode, adKeywords } = usePlayerSettings(isPremium);
     const { mediaProxyEnabled } = useRuntimeFeatures();
     const isAdFilterEnabled = adFilterMode !== 'off';
 
@@ -59,7 +59,7 @@ export function useHlsPlayer({
                             if (typeof response.data === 'string') {
                                 try {
                                     // Filter the content
-                                    response.data = filterM3u8Ad(response.data, context.url, adFilterMode, adKeywords, customAdFilterCode);
+                                    response.data = filterM3u8Ad(response.data, context.url, adFilterMode, adKeywords);
                                 } catch (e) {
                                     console.warn('[HLS] Ad filter error:', e);
                                 }
@@ -255,7 +255,7 @@ export function useHlsPlayer({
 
                         // If it's a simple playlist (no variants), just filter and play
                         if (!masterContent.includes('#EXT-X-STREAM-INF')) {
-                            const filtered = filterM3u8Ad(masterContent, absoluteMasterSrc, adFilterMode, adKeywords, customAdFilterCode);
+                            const filtered = filterM3u8Ad(masterContent, absoluteMasterSrc, adFilterMode, adKeywords);
                             const blob = new Blob([filtered], { type: 'application/vnd.apple.mpegurl' });
                             const blobUrl = URL.createObjectURL(blob);
                             createdBlobs.push(blobUrl);
@@ -283,7 +283,7 @@ export function useHlsPlayer({
                                         try {
                                             const absoluteUrl = isRelative ? new URL(uri, absoluteMasterSrc).toString() : uri;
                                             const subContent = await fetchWithFallback(absoluteUrl);
-                                            const filteredSub = filterM3u8Ad(subContent, absoluteUrl, adFilterMode, adKeywords, customAdFilterCode);
+                                            const filteredSub = filterM3u8Ad(subContent, absoluteUrl, adFilterMode, adKeywords);
                                             const subBlob = new Blob([filteredSub], { type: 'application/vnd.apple.mpegurl' });
                                             const subBlobUrl = URL.createObjectURL(subBlob);
                                             createdBlobs.push(subBlobUrl);
@@ -306,7 +306,7 @@ export function useHlsPlayer({
                                     try {
                                         const absoluteUrl = isRelative ? new URL(trimmedLine, absoluteMasterSrc).toString() : trimmedLine;
                                         const subContent = await fetchWithFallback(absoluteUrl);
-                                        const filteredSub = filterM3u8Ad(subContent, absoluteUrl, adFilterMode, adKeywords, customAdFilterCode);
+                                        const filteredSub = filterM3u8Ad(subContent, absoluteUrl, adFilterMode, adKeywords);
                                         const subBlob = new Blob([filteredSub], { type: 'application/vnd.apple.mpegurl' });
                                         const subBlobUrl = URL.createObjectURL(subBlob);
                                         createdBlobs.push(subBlobUrl);
@@ -424,5 +424,5 @@ export function useHlsPlayer({
             }
             extraBlobs.forEach(url => URL.revokeObjectURL(url));
         };
-    }, [src, videoRef, autoPlay, onAutoPlayPrevented, onError, isAdFilterEnabled, adFilterMode, adKeywords, customAdFilterCode, mediaProxyEnabled]);
+    }, [src, videoRef, autoPlay, onAutoPlayPrevented, onError, isAdFilterEnabled, adFilterMode, adKeywords, mediaProxyEnabled]);
 }
