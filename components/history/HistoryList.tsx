@@ -1,6 +1,7 @@
 import { HistoryItem } from './HistoryItem';
 import { HistoryEmptyState } from './HistoryEmptyState';
 import type { VideoHistoryItem } from '@/lib/types';
+import { keepRenderableHistory } from '@/lib/utils/sync-records';
 
 interface HistoryListProps {
     history: VideoHistoryItem[];
@@ -18,7 +19,7 @@ export function HistoryList({ history, onRemove, isPremium = false }: HistoryLis
                 <HistoryEmptyState />
             ) : (
                 <div className="space-y-3">
-                    {history.map((item) => (
+                    {keepRenderableHistory(history).map((item) => (
                         <HistoryItem
                             key={item.showIdentifier}
                             item={item}

@@ -5,6 +5,7 @@
 import type { FavoriteItem } from '@/lib/types';
 import { FavoritesItem } from './FavoritesItem';
 import { FavoritesEmptyState } from './FavoritesEmptyState';
+import { keepRenderableFavorites } from '@/lib/utils/sync-records';
 
 interface FavoritesListProps {
     favorites: FavoriteItem[];
@@ -19,7 +20,7 @@ export function FavoritesList({ favorites, onRemove, isPremium = false }: Favori
 
     return (
         <div className="flex-1 overflow-y-auto -mx-2 px-2 space-y-2 scroll-smooth">
-            {favorites.map((item) => (
+            {keepRenderableFavorites(favorites).map((item) => (
                 <FavoritesItem
                     key={`${item.source}:${item.videoId}`}
                     item={item}
