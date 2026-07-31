@@ -16,5 +16,5 @@ export function getRuntimeEnvValue(name: string, fallback = ''): string {
     // Outside Cloudflare's request runtime, fall back to process.env.
   }
 
-  return process.env[name] || fallback;
+  return typeof process !== 'undefined' ? process.env[name] || fallback : fallback;
 }

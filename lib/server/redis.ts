@@ -2,7 +2,7 @@ import { Redis } from '@upstash/redis/cloudflare';
 
 import { getRuntimeEnvValue } from '@/lib/server/runtime-env';
 
-let cachedRedis: Redis | null | undefined;
+let cachedRedis: Redis | undefined;
 
 /**
  * Build the shared Upstash client from whichever environment source is available.
@@ -17,15 +17,14 @@ let cachedRedis: Redis | null | undefined;
  * "server-side sync unavailable" rather than as a request failure.
  */
 export function getRedisClient(): Redis | null {
-  if (cachedRedis !== undefined) {
+  if (cachedRedis) {
     return cachedRedis;
   }
 
   const url = getRuntimeEnvValue('UPSTASH_REDIS_REST_URL');
   const token = getRuntimeEnvValue('UPSTASH_REDIS_REST_TOKEN');
   if (!url || !token) {
-    cachedRedis = null;
-    return cachedRedis;
+    return null;
   }
 
   cachedRedis = new Redis({

@@ -4,19 +4,25 @@ function hasIdentity(value: unknown): boolean {
   if (!value || typeof value !== 'object') return false;
   const record = value as { videoId?: unknown; source?: unknown; title?: unknown };
   const videoId = record.videoId;
-  const hasVideoId = typeof videoId === 'string' ? videoId.length > 0 : typeof videoId === 'number';
+  const hasVideoId = typeof videoId === 'string'
+    ? videoId.trim().length > 0
+    : typeof videoId === 'number' && Number.isFinite(videoId);
 
-  return hasVideoId && typeof record.source === 'string' && typeof record.title === 'string';
+  return hasVideoId &&
+    typeof record.source === 'string' && record.source.trim().length > 0 &&
+    typeof record.title === 'string' && record.title.trim().length > 0;
 }
 
 /**
  * Records restored from server-side sync are not guaranteed to be well formed —
  * they may come from an older schema or a partial write. Rendering one without
- * `videoId` throws while building the player URL, which takes down the whole
- * page, so anything lacking a usable identity is dropped on the way in.
+ * `videoId` or `episodeIndex` throws while building the player URL, which takes
+ * down the whole page, so anything lacking the required URL fields is dropped.
  */
 export function isRenderableHistoryItem(value: unknown): value is VideoHistoryItem {
-  return hasIdentity(value);
+  if (!hasIdentity(value)) return false;
+  const episodeIndex = (value as { episodeIndex?: unknown }).episodeIndex;
+  return typeof episodeIndex === 'number' && Number.isInteger(episodeIndex) && episodeIndex >= 0;
 }
 
 export function isRenderableFavoriteItem(value: unknown): value is FavoriteItem {
